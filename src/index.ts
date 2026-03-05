@@ -407,7 +407,11 @@ function createServer(): McpServer {
 
 // ─── Express app with Streamable HTTP transport ──────────────────────────────
 const app = express();
-app.use(express.json());
+// Only parse JSON for non-MCP routes. The MCP SDK reads the raw body stream itself.
+app.use((req, res, next) => {
+  if (req.path === "/mcp") return next();
+  express.json()(req, res, next);
+});
 
 // Store transports by session ID for session management
 const transports = new Map<string, StreamableHTTPServerTransport>();
