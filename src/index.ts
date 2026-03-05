@@ -8,11 +8,38 @@ import { randomUUID } from "crypto";
 const FIBER_BASE_URL = "https://api.fiber.ai";
 const PORT = parseInt(process.env.PORT || "3000", 10);
 const FIBER_API_KEY = process.env.FIBER_API_KEY || "";
+const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
 
 if (!FIBER_API_KEY) {
   console.warn(
     "⚠️  FIBER_API_KEY not set. The server will start but all tool calls will fail."
   );
+}
+
+if (!MCP_AUTH_TOKEN) {
+  console.warn(
+    "⚠️  MCP_AUTH_TOKEN not set. The MCP endpoint will be publicly accessible!"
+  );
+}
+
+// ─── Auth middleware ─────────────────────────────────────────────────────────
+function authMiddleware(req: Request, res: Response, next: () => void) {
+  // Skip auth if no token configured (backwards compatible)
+  if (!MCP_AUTH_TOKEN) return next();
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized: Bearer token required" });
+    return;
+  }
+
+  const token = authHeader.slice(7);
+  if (token !== MCP_AUTH_TOKEN) {
+    res.status(403).json({ error: "Forbidden: Invalid token" });
+    return;
+  }
+
+  next();
 }
 
 // ─── Fiber API helper ────────────────────────────────────────────────────────
@@ -422,7 +449,7 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 // MCP endpoint — handles POST (messages), GET (SSE stream), DELETE (session end)
-app.post("/mcp", async (req: Request, res: Response) => {
+app.post("/mcp", authMiddleware, async (req: Request, res: Response) => {
   try {
     // Check for existing session
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -465,7 +492,7 @@ app.post("/mcp", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/mcp", async (req: Request, res: Response) => {
+app.get("/mcp", authMiddleware, async (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
   if (!sessionId || !transports.has(sessionId)) {
     res.status(400).json({ error: "Invalid or missing session ID" });
@@ -475,7 +502,7 @@ app.get("/mcp", async (req: Request, res: Response) => {
   await transport.handleRequest(req, res);
 });
 
-app.delete("/mcp", async (req: Request, res: Response) => {
+app.delete("/mcp", authMiddleware, async (req: Request, res: Response) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
   if (!sessionId || !transports.has(sessionId)) {
     res.status(400).json({ error: "Invalid or missing session ID" });
@@ -493,5 +520,8 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`   MCP:    http://0.0.0.0:${PORT}/mcp`);
   console.log(
     `   API Key: ${FIBER_API_KEY ? "✅ configured" : "❌ NOT SET"}`
+  );
+  console.log(
+    `   Auth:    ${MCP_AUTH_TOKEN ? "✅ Bearer token required" : "⚠️  OPEN (no auth)"}`
   );
 });
